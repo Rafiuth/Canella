@@ -1,0 +1,7 @@
+.vs/
+*.user
+*.suo
+*.aps
+bin/
+obj/
+vcpkg_installed/

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg/master/scripts/vcpkg.schema.json",
+  "name": "spicetify-audio-vis",
+  "version": "1.0",
+  "dependencies": [
+    "wil",
+    "pffft",
+    {
+      "name": "usockets",
+      "default-features": false,
+      "features": [ "network" ]
+    },
+    "uwebsockets"
+  ]
+}

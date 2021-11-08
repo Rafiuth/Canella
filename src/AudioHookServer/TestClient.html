@@ -1,0 +1,147 @@
+<html>
+<body style="overflow: hidden">
+<canvas id="canvas" style="position: absolute; left: 0%; top: 0%;"></canvas>
+
+<script>
+
+window.onload = () => {
+    let ws = new WebSocket("ws://127.0.0.1:6347/audio_hook");
+    ws.binaryType = "arraybuffer";
+    
+    let canvas = document.getElementById("canvas");
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    let ctx = canvas.getContext("2d");
+    
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    let column = 0;
+    
+    ws.onmessage = function(ev)
+    {
+        let data = ev.data;
+        if (!(data instanceof ArrayBuffer)) {
+            ws.close(1002, "Binary message expected");
+            return;
+        }
+        let { numSamples, channels } = decodeAudioFrame(data);
+        
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, numSamples/2, canvas.width, canvas.height - numSamples/2);
+        
+        ctx.save();
+        ctx.translate(0,canvas.height);
+        ctx.scale(1,-1);
+        drawBarsFreq(canvas.width, canvas.height, ctx, numSamples, channels);
+        ctx.restore();
+        /*
+        //quite terrible waveform display
+        ctx.strokeStyle = "#1f3";
+        for (let c = 0; c < channels.length; c++) {
+            let pcm = channels[c].pcm;
+            let waveHeight = canvas.height / 2 / channels.length;
+            let offsetY = canvas.height / 2 + c * waveHeight + waveHeight * 0.5;
+            
+            ctx.beginPath();
+            for (let i = 0; i < numSamples; i++) {
+                let level = pcm[i] / 32767;
+                let y = offsetY + level * waveHeight * 0.5;
+                let x = i * canvas.width / numSamples;
+                
+                if (i == 0) ctx.moveTo(x, y);
+                else        ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        }*/
+        
+        //spectogram
+        let numBins = numSamples / 2;
+        let image = new ImageData(1, numBins);
+        
+        for (let y = 0; y < numBins; y++) {
+            //https://github.com/FFmpeg/FFmpeg/blob/9d4989f2e17c11d4ee9daa489b6e4f5195d80b99/fftools/ffplay.c#L1186
+            let w = 1 / Math.sqrt(numSamples);
+            let a = Math.sqrt(w * channels[0].fft[numBins - 1 - y])*255;
+            let b = Math.sqrt(w * channels[1].fft[numBins - 1 - y])*255;
+            
+            image.data[y * 4 + 0] = a;
+            image.data[y * 4 + 1] = b;
+            image.data[y * 4 + 2] = (a+b)/2;
+            image.data[y * 4 + 3] = 255;
+        }
+        ctx.putImageData(image, column, 0);
+        column = (column + 1) % canvas.width;
+    };
+    let freqData;
+    let numBars = 128;
+    
+    function drawBarsFreq(width, height, ctx, numSamples, channels)
+    {
+        let numBins = numSamples / 2;
+        freqData ??= [...Array(numBins)].fill(0);
+        
+        for (let i = 0; i < numBins; i++) {
+            let mag = 0;
+            for (let c = 0; c < channels.length; c++) {
+                mag += channels[c].fft[i];
+            }
+            mag = mag / (numSamples * channels.length);
+            
+            let a = 0.9;
+            freqData[i] = freqData[i] * a + mag * (1.0 - a);
+        }
+        
+        ctx.fillStyle = "#fff";
+        
+        let spacing = 1;
+        let barWidth = width / numBars;
+        
+        for (let i = 0; i < numBars; i++) {
+            let x = i * barWidth;
+            
+            let barHeight = 0;
+            
+            let binStart = Math.floor(i * numBins / numBars);
+            let binEnd = Math.ceil((i + 1) * numBins / numBars);
+            for (let j = binStart; j < binEnd; j++) {
+                let mag = freqData[j];
+                if (mag > barHeight) barHeight = mag;
+                //barHeight += mag;
+            }
+            //convert to db and rescale to 0..1 (based on webaudio spec)
+            const MIN_DB = -100;
+            const MAX_DB = -30;
+            barHeight = 20 * Math.log10(barHeight);
+            barHeight = 1.0 / (MAX_DB - MIN_DB) * (barHeight - MIN_DB);
+            if (barHeight > 1.0) barHeight = 1.0;
+            if (barHeight < 0.0) barHeight = 0.0;
+            
+            ctx.fillRect(x, 0, barWidth - spacing, barHeight * height * 0.5);
+        }
+    }
+    
+    function decodeAudioFrame(data)
+    {
+        let view = new DataView(data);
+        let numSamples = view.getInt32(0, true);
+        let numChannels = view.getUint16(4, true);
+        let dataPos = 6;
+        
+        let channels = [];
+        for (let c = 0; c < numChannels; c++) {
+            let pcm = new Int16Array(data, dataPos, numSamples);
+            dataPos += numSamples * 2;
+            dataPos += dataPos & 3; //align
+            let fft = new Float32Array(data, dataPos, numSamples / 2);
+            dataPos += numSamples / 2 * 4;
+            
+            channels.push({ pcm: pcm, fft: fft });
+        }
+        return { numSamples: numSamples, channels: channels };
+    }
+};
+</script>
+
+</body>
+</html>

@@ -1,0 +1,4 @@
+[submodule "spicetify-cli"]
+	path = spicetify-cli
+	url = https://github.com/khanhas/spicetify-cli.git
+	shallow = true
